@@ -103,6 +103,33 @@ INDICATOR_COLUMNS = [
     "Q4 Total",
 ]
 
+ALOD_CUMMU_INDICATOR_COLUMNS = [
+    "Period",
+    "Organization",
+    "Project Name",
+    "indicator",
+    "Annual U1 Male",
+    "Annual U1 Female",
+    "Annual 1-5 Male",
+    "Annual 1-5 Female",
+    "Annual Total",
+    "S1 U1 Male",
+    "S1 U1 Female",
+    "S1 1-5 Male",
+    "S1 1-5 Female",
+    "S1 Total",
+    "uptoQ3 U1 Male",
+    "uptoQ3 U1 Female",
+    "uptoQ3 1-5 Male",
+    "uptoQ3 1-5 Female",
+    "uptoQ3 Total",
+    "S2 U1 Male",
+    "S2 U1 Female",
+    "S2 1-5 Male",
+    "S2 1-5 Female",
+    "S2 Total",
+]
+
 INDICATOR_NAMES = [
     "Penta3 under 1-yr-old",
     "MMR1 under 1-yr-old",
@@ -658,6 +685,90 @@ def create_indicator_sheet(frame: pd.DataFrame) -> pd.DataFrame:
     return indicator_df
 
 
+def create_alod_cummu_indicator_sheet(frame: pd.DataFrame) -> pd.DataFrame:
+    normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in frame.columns}
+    vaccine_date_column = normalized_columns.get("vaccine_date")
+    vaccine_column = normalized_columns.get("vaccine")
+    sex_column = normalized_columns.get("sex")
+    beneficiary_column = normalized_columns.get("hn")
+
+    if not vaccine_date_column or not vaccine_column or not sex_column or not beneficiary_column:
+        print("WARNING: alod_cummu_indicator could not be generated because required columns are missing.")
+        return pd.DataFrame(columns=ALOD_CUMMU_INDICATOR_COLUMNS)
+
+    work = frame.copy()
+    work[vaccine_date_column] = pd.to_datetime(work[vaccine_date_column], errors="coerce")
+    work = work.dropna(subset=[vaccine_date_column, beneficiary_column])
+    if work.empty:
+        print("WARNING: alod_cummu_indicator generated with no rows because required values are missing.")
+        return pd.DataFrame(columns=ALOD_CUMMU_INDICATOR_COLUMNS)
+
+    work["beneficiary_id"] = work[beneficiary_column].astype(str).str.strip()
+    work = work[work["beneficiary_id"] != ""]
+    work["Year"] = work[vaccine_date_column].dt.year.astype("Int64")
+    work["Month"] = work[vaccine_date_column].dt.month.astype("Int64")
+    work["vaccine_group"] = work[vaccine_column].map(map_vaccine_group)
+    work["age_months"] = pd.to_numeric(work.get("age_at_dose"), errors="coerce")
+    work["sex_norm"] = work[sex_column].astype(str).str.strip().str.upper()
+
+    # Same base indicator logic as "At least one dose under 5-yr-old" in Indicator sheet.
+    work = work[work["vaccine_group"].notna()].copy()
+
+    def segment_counts(segment_mask: pd.Series) -> tuple[int, int, int, int, int]:
+        u1_mask = segment_mask & work["age_months"].between(0, 11, inclusive="both")
+        u5_mask = segment_mask & work["age_months"].between(12, 59, inclusive="both")
+
+        u1_m = int(work.loc[u1_mask & work["sex_norm"].eq("M"), "beneficiary_id"].nunique())
+        u1_f = int(work.loc[u1_mask & work["sex_norm"].eq("F"), "beneficiary_id"].nunique())
+        u5_m = int(work.loc[u5_mask & work["sex_norm"].eq("M"), "beneficiary_id"].nunique())
+        u5_f = int(work.loc[u5_mask & work["sex_norm"].eq("F"), "beneficiary_id"].nunique())
+        total = u1_m + u1_f + u5_m + u5_f
+        return u1_m, u1_f, u5_m, u5_f, total
+
+    rows: list[dict[str, object]] = []
+    years = sorted(work["Year"].dropna().astype(int).unique())
+
+    for year_value in years:
+        year_mask = work["Year"].eq(year_value)
+
+        annual = segment_counts(year_mask)
+        s1 = segment_counts(year_mask & work["Month"].between(1, 6, inclusive="both"))
+        upto_q3 = segment_counts(year_mask & work["Month"].between(1, 9, inclusive="both"))
+        s2 = segment_counts(year_mask & work["Month"].between(7, 12, inclusive="both"))
+
+        row: dict[str, object] = {
+            "Period": year_value,
+            "Organization": "PRF",
+            "Project Name": "REACH-KK",
+            "indicator": "At least one dose under 5-yr-old",
+            "Annual U1 Male": annual[0],
+            "Annual U1 Female": annual[1],
+            "Annual 1-5 Male": annual[2],
+            "Annual 1-5 Female": annual[3],
+            "Annual Total": annual[4],
+            "S1 U1 Male": s1[0],
+            "S1 U1 Female": s1[1],
+            "S1 1-5 Male": s1[2],
+            "S1 1-5 Female": s1[3],
+            "S1 Total": s1[4],
+            "uptoQ3 U1 Male": upto_q3[0],
+            "uptoQ3 U1 Female": upto_q3[1],
+            "uptoQ3 1-5 Male": upto_q3[2],
+            "uptoQ3 1-5 Female": upto_q3[3],
+            "uptoQ3 Total": upto_q3[4],
+            "S2 U1 Male": s2[0],
+            "S2 U1 Female": s2[1],
+            "S2 1-5 Male": s2[2],
+            "S2 1-5 Female": s2[3],
+            "S2 Total": s2[4],
+        }
+        rows.append(row)
+
+    alod_cummu_indicator = pd.DataFrame(rows).reindex(columns=ALOD_CUMMU_INDICATOR_COLUMNS, fill_value=0)
+    print(f"INFO: Created alod_cummu_indicator sheet with {len(alod_cummu_indicator)} year row(s)")
+    return alod_cummu_indicator
+
+
 def create_unpivot_sheet(frame: pd.DataFrame) -> pd.DataFrame:
     required_columns = ["child_name", "visit_number", "mother_name", "vaccine", "vaccine_date"]
     normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in frame.columns}
@@ -828,6 +939,7 @@ def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combi
     summary = create_summary_sheet(combined)
     yearly_cummu_summary = create_yearly_cummu_summary_sheet(combined)
     indicator = create_indicator_sheet(combined)
+    alod_cummu_indicator = create_alod_cummu_indicator_sheet(combined)
     unpivot = create_unpivot_sheet(combined)
 
     with pd.ExcelWriter(output_path, engine="openpyxl", date_format="yyyy-mm-dd", datetime_format="yyyy-mm-dd") as writer:
@@ -835,6 +947,7 @@ def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combi
         summary.to_excel(writer, index=False, sheet_name="Summary")
         yearly_cummu_summary.to_excel(writer, index=False, sheet_name="yearly_cummu_summary")
         indicator.to_excel(writer, index=False, sheet_name="Indicator")
+        alod_cummu_indicator.to_excel(writer, index=False, sheet_name="alod_cummu_indicator")
         unpivot.to_excel(writer, index=False, sheet_name="Unpivot")
 
 
