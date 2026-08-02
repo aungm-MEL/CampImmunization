@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl.styles import Font
+from openpyxl.styles import PatternFill
 
 
 SUMMARY_COLUMNS = [
@@ -878,6 +879,7 @@ def highlight_invalid_age_hn_cells(writer: pd.ExcelWriter, combined: pd.DataFram
     normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in combined.columns}
     hn_column = normalized_columns.get("hn")
     age_at_dose_column = normalized_columns.get("age_at_dose")
+    sex_column = normalized_columns.get("sex")
 
     if not hn_column or not age_at_dose_column:
         print("WARNING: HN highlight skipped because hn or age_at_dose column is missing.")
@@ -886,7 +888,6 @@ def highlight_invalid_age_hn_cells(writer: pd.ExcelWriter, combined: pd.DataFram
     invalid_age_mask = pd.to_numeric(combined[age_at_dose_column], errors="coerce").eq(99999)
     if not invalid_age_mask.any():
         print("INFO: No age_at_dose=99999 rows found for HN highlight.")
-        return
 
     worksheet = writer.sheets.get(sheet_name)
     if worksheet is None:
@@ -903,6 +904,26 @@ def highlight_invalid_age_hn_cells(writer: pd.ExcelWriter, combined: pd.DataFram
         highlighted += 1
 
     print(f"INFO: Highlighted {highlighted} HN cell(s) in red where age_at_dose is 99999.")
+
+    if not sex_column:
+        print("WARNING: Sex NA fill skipped because sex column is missing.")
+        return
+
+    na_sex_mask = combined[sex_column].astype(str).str.strip().str.upper().eq("NA")
+    if not na_sex_mask.any():
+        print("INFO: No sex='NA' rows found for red fill.")
+        return
+
+    sex_col_index = combined.columns.get_loc(sex_column) + 1
+    red_fill = PatternFill(fill_type="solid", start_color="00FF0000", end_color="00FF0000")
+    filled = 0
+
+    for row_index in combined.index[na_sex_mask]:
+        excel_row = int(row_index) + 2  # Header is row 1 in Excel.
+        worksheet.cell(row=excel_row, column=sex_col_index).fill = red_fill
+        filled += 1
+
+    print(f"INFO: Applied red fill to {filled} sex cell(s) where value is NA.")
 
 
 def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combined") -> None:
