@@ -59,6 +59,19 @@ SUMMARY_COLUMNS = [
     "Td At least one dose",
 ]
 
+YEARLY_CUMMU_SUMMARY_COLUMNS = [
+    "Year",
+    "Organization",
+    "Project Name",
+    "District (EHO)",
+    "Township_EHO",
+    "Twp_MIMU",
+    "Clinic Name",
+    "ALOD_U1",
+    "ALOD_U5",
+    "ALOD_>5",
+]
+
 INDICATOR_COLUMNS = [
     "Period",
     "Organization",
@@ -459,6 +472,64 @@ def create_summary_sheet(frame: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def create_yearly_cummu_summary_sheet(frame: pd.DataFrame) -> pd.DataFrame:
+    normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in frame.columns}
+    vaccine_date_column = normalized_columns.get("vaccine_date")
+    beneficiary_column = normalized_columns.get("beneficiary_code") or normalized_columns.get("hn")
+
+    if not vaccine_date_column:
+        print("WARNING: yearly_cummu_summary could not be generated because vaccine_date column is missing.")
+        return pd.DataFrame(columns=YEARLY_CUMMU_SUMMARY_COLUMNS)
+
+    if beneficiary_column != normalized_columns.get("beneficiary_code"):
+        print("WARNING: beneficiary_code column not found for yearly_cummu_summary. Using 'hn' as unique beneficiary identifier.")
+
+    work = frame.copy()
+    work[vaccine_date_column] = pd.to_datetime(work[vaccine_date_column], errors="coerce")
+    work = work.dropna(subset=[vaccine_date_column, beneficiary_column])
+
+    if work.empty:
+        print("WARNING: yearly_cummu_summary generated with no rows because required values are missing.")
+        return pd.DataFrame(columns=YEARLY_CUMMU_SUMMARY_COLUMNS)
+
+    work["beneficiary_id"] = work[beneficiary_column].astype(str).str.strip()
+    work = work[work["beneficiary_id"] != ""]
+    work["Year"] = work[vaccine_date_column].dt.year.astype("Int64")
+    work["age_months"] = pd.to_numeric(work.get("age_at_dose"), errors="coerce")
+
+    yearly_rows: list[dict[str, object]] = []
+
+    for year_value in sorted(work["Year"].dropna().astype(int).unique()):
+        year_frame = work[work["Year"] == year_value]
+
+        def unique_count_by_age(min_age: int, max_age: int) -> int:
+            subset = year_frame[year_frame["age_months"].between(min_age, max_age, inclusive="both")]
+            return int(subset["beneficiary_id"].nunique())
+
+        def unique_count_over_5() -> int:
+            subset = year_frame[year_frame["age_months"] >= 60]
+            return int(subset["beneficiary_id"].nunique())
+
+        row: dict[str, object] = {
+            "Year": year_value,
+            "Organization": "PRF",
+            "Project Name": "REACH-KK",
+            "District (EHO)": "",
+            "Township_EHO": "",
+            "Twp_MIMU": "Phop Phra",
+            "Clinic Name": "Umphang Camp",
+            "ALOD_U1": unique_count_by_age(0, 11),
+            "ALOD_U5": unique_count_by_age(11, 59),
+            "ALOD_>5": unique_count_over_5(),
+        }
+        yearly_rows.append(row)
+
+    yearly_summary = pd.DataFrame(yearly_rows)
+    yearly_summary = yearly_summary.reindex(columns=YEARLY_CUMMU_SUMMARY_COLUMNS, fill_value=0)
+    print(f"INFO: Created yearly_cummu_summary sheet with {len(yearly_summary)} year row(s)")
+    return yearly_summary
+
+
 def create_indicator_sheet(frame: pd.DataFrame) -> pd.DataFrame:
     normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in frame.columns}
     vaccine_date_column = normalized_columns.get("vaccine_date")
@@ -755,12 +826,14 @@ def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combi
     combined = add_visit_age_column(combined)
 
     summary = create_summary_sheet(combined)
+    yearly_cummu_summary = create_yearly_cummu_summary_sheet(combined)
     indicator = create_indicator_sheet(combined)
     unpivot = create_unpivot_sheet(combined)
 
     with pd.ExcelWriter(output_path, engine="openpyxl", date_format="yyyy-mm-dd", datetime_format="yyyy-mm-dd") as writer:
         combined.to_excel(writer, index=False, sheet_name=sheet_name)
         summary.to_excel(writer, index=False, sheet_name="Summary")
+        yearly_cummu_summary.to_excel(writer, index=False, sheet_name="yearly_cummu_summary")
         indicator.to_excel(writer, index=False, sheet_name="Indicator")
         unpivot.to_excel(writer, index=False, sheet_name="Unpivot")
 
