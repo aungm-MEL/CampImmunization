@@ -47,9 +47,8 @@ def run_pipeline(input_bytes: bytes, source_name: str) -> tuple[bytes, str]:
         return output_path.read_bytes(), log_buffer.getvalue()
 
 
-def parse_pipeline_messages(logs: str) -> tuple[list[str], list[str], list[str]]:
+def parse_pipeline_messages(logs: str) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
-    notes: list[str] = []
     others: list[str] = []
 
     for raw_line in logs.splitlines():
@@ -58,12 +57,10 @@ def parse_pipeline_messages(logs: str) -> tuple[list[str], list[str], list[str]]
             continue
         if line.startswith("WARNING:"):
             warnings.append(line)
-        elif line.startswith("INFO:"):
-            notes.append(line)
         else:
             others.append(line)
 
-    return warnings, notes, others
+    return warnings, others
 
 
 st.set_page_config(page_title="PRF EPI Report", layout="wide")
@@ -100,7 +97,7 @@ try:
 
     st.success("Report created successfully.")
 
-    warnings, notes, others = parse_pipeline_messages(logs)
+    warnings, others = parse_pipeline_messages(logs)
 
     st.subheader("Warning Signs")
     if warnings:
@@ -108,13 +105,6 @@ try:
             st.warning(warning_line)
     else:
         st.info("No warning signs were found during processing.")
-
-    st.subheader("Notes")
-    if notes:
-        for note_line in notes:
-            st.info(note_line)
-    else:
-        st.info("No notes were generated.")
 
     if logs.strip():
         st.subheader("Pipeline logs")
