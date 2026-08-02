@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
+from openpyxl.styles import Font
 
 
 SUMMARY_COLUMNS = [
@@ -873,6 +874,37 @@ def create_unpivot_sheet(frame: pd.DataFrame) -> pd.DataFrame:
     return unpivot
 
 
+def highlight_invalid_age_hn_cells(writer: pd.ExcelWriter, combined: pd.DataFrame, sheet_name: str) -> None:
+    normalized_columns = {str(col).strip().lower().replace(" ", "_"): col for col in combined.columns}
+    hn_column = normalized_columns.get("hn")
+    age_at_dose_column = normalized_columns.get("age_at_dose")
+
+    if not hn_column or not age_at_dose_column:
+        print("WARNING: HN highlight skipped because hn or age_at_dose column is missing.")
+        return
+
+    invalid_age_mask = pd.to_numeric(combined[age_at_dose_column], errors="coerce").eq(99999)
+    if not invalid_age_mask.any():
+        print("INFO: No age_at_dose=99999 rows found for HN highlight.")
+        return
+
+    worksheet = writer.sheets.get(sheet_name)
+    if worksheet is None:
+        print(f"WARNING: HN highlight skipped because sheet '{sheet_name}' was not found.")
+        return
+
+    hn_col_index = combined.columns.get_loc(hn_column) + 1
+    red_font = Font(color="00FF0000")
+    highlighted = 0
+
+    for row_index in combined.index[invalid_age_mask]:
+        excel_row = int(row_index) + 2  # Header is row 1 in Excel.
+        worksheet.cell(row=excel_row, column=hn_col_index).font = red_font
+        highlighted += 1
+
+    print(f"INFO: Highlighted {highlighted} HN cell(s) in red where age_at_dose is 99999.")
+
+
 def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combined") -> None:
     workbook = pd.ExcelFile(input_path)
     frames: list[pd.DataFrame] = []
@@ -949,6 +981,7 @@ def combine_sheets(input_path: Path, output_path: Path, sheet_name: str = "Combi
         indicator.to_excel(writer, index=False, sheet_name="Indicator")
         alod_cummu_indicator.to_excel(writer, index=False, sheet_name="alod_cummu_indicator")
         unpivot.to_excel(writer, index=False, sheet_name="Unpivot")
+        highlight_invalid_age_hn_cells(writer, combined, sheet_name)
 
 
 def parse_args() -> argparse.Namespace:
