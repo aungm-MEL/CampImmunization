@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import traceback
+from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -12,6 +13,7 @@ import streamlit as st
 
 APP_DIR = Path(__file__).resolve().parent
 PIPELINE_PATH = APP_DIR / "PRF EPI report.py"
+DEFAULT_OUTPUT_NAME = f"Umpium_EPI_Quarterly_report_{date.today():%Y%m%d}.xlsx"
 
 
 def load_pipeline_module(script_path: Path):
@@ -33,7 +35,7 @@ def run_pipeline(input_bytes: bytes, source_name: str) -> tuple[bytes, str]:
     with TemporaryDirectory(prefix="prf_streamlit_") as temp_dir:
         temp_dir_path = Path(temp_dir)
         input_path = temp_dir_path / source_name
-        output_path = temp_dir_path / "PRF_Quarterly_report.xlsx"
+        output_path = temp_dir_path / DEFAULT_OUTPUT_NAME
 
         input_path.write_bytes(input_bytes)
 
@@ -72,7 +74,7 @@ if not PIPELINE_PATH.exists():
     st.stop()
 
 upload = st.file_uploader("Upload source workbook", type=["xlsx", "xlsm"])
-default_output_name = "PRF_Quarterly_report.xlsx"
+default_output_name = DEFAULT_OUTPUT_NAME
 output_name = st.text_input("Output filename", value=default_output_name).strip() or default_output_name
 
 run_clicked = st.button("Run report", type="primary", use_container_width=True)
