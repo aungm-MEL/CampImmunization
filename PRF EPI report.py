@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -1016,7 +1017,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "output_path",
         nargs="?",
-        default="PRF_Quarterly_report.xlsx",
+        default=f"Umpium_EPI_Quarterly_report_{date.today():%Y%m%d}.xlsx",
         help="Path to the output workbook.",
     )
     return parser.parse_args()
